@@ -1,0 +1,218 @@
+<meta charset="utf-8">
+<title>Tabkha طبخة</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#2A2F22">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tabkha">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Figtree:wght@400;500;600;700&family=Aref+Ruqaa:wght@400;700&display=swap">
+<style>
+/* Layout: the phone screen is the product; on wide screens a quiet presenter rail sits beside it. */
+:root {
+  --night: #2A2F22;      /* balcony at night, page ground */
+  --olive: #363C2D;      /* app background */
+  --leaf: #CBD8A0;       /* vine green labels */
+  --cream: #E9E6D8;      /* primary text on dark */
+  --muted: #9DA290;
+  --rose: #F0788A;       /* pomegranate accent */
+  --line: #4A5240;
+  --display: 'Fraunces', Georgia, serif;
+  --body: 'Figtree', system-ui, sans-serif;
+  --arabic: 'Aref Ruqaa', 'Noto Naskh Arabic', serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--night); color: var(--cream); font-family: var(--body); overflow: hidden; }
+#shell { height: 100%; display: flex; align-items: center; justify-content: center; gap: 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); box-sizing: border-box; }
+#rail { display: none; width: 260px; max-height: 92%; flex-direction: column; gap: 18px; min-width: 0; }
+#rail h1 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 34px; line-height: 1; display: flex; align-items: baseline; gap: 10px; }
+#rail h1 span { font-family: var(--arabic); color: var(--rose); font-size: 28px; }
+#rail p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+#rail nav { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; }
+#rail nav button { text-align: left; background: transparent; border: 0; color: var(--muted); font: 500 14px var(--body); padding: 7px 10px; border-radius: 10px; cursor: pointer; }
+#rail nav button:hover { color: var(--cream); background: rgba(255,255,255,0.05); }
+#rail nav button[aria-current="true"] { color: var(--night); background: var(--leaf); font-weight: 700; }
+#rail nav button:focus-visible, #rail .restart:focus-visible { outline: 2px solid var(--rose); outline-offset: 2px; }
+#rail .label { font-size: 11px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--leaf); }
+#rail .restart { align-self: flex-start; background: transparent; color: var(--cream); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font: 600 13px var(--body); cursor: pointer; }
+#stage { position: relative; flex: none; }
+#phone { width: 390px; height: 844px; transform-origin: top left; position: absolute; left: 0; top: 0; overflow: hidden; background: var(--olive); }
+#stage.framed #phone { border-radius: 44px; box-shadow: 0 0 0 10px #1B1F16, 0 0 0 11px #3E4535, 0 40px 80px rgba(0,0,0,0.55); }
+#screen { width: 390px; height: 844px; }
+#screen a, #screen button { -webkit-tap-highlight-color: transparent; }
+#boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--arabic); font-size: 40px; color: var(--rose); }
+@media (min-width: 900px) { #rail { display: flex; } }
+@media (prefers-reduced-motion: reduce) { #screen * { animation: none !important; transition: none !important; } }
+</style>
+<style id="screen-css"></style>
+
+<div id="shell">
+  <aside id="rail" aria-label="Presenter">
+    <h1>Tabkha <span lang="ar">طبخة</span></h1>
+    <p>What can I cook tonight, from what's in my kitchen, the way teta makes it. Clickable prototype: tap through the phone, or jump to any screen below.</p>
+    <span class="label">Screens</span>
+    <nav id="list"></nav>
+    <button class="restart" id="restart" type="button">Reset demo</button>
+  </aside>
+  <div id="stage"><div id="phone"><div id="screen"></div><div id="boot" lang="ar">طبخة</div></div></div>
+</div>
+
+<script src="screens.js" charset="utf-8"></script>
+<script>
+(function () {
+  var SCREENS = window.TABKHA_SCREENS, ORDER = window.TABKHA_ORDER;
+  var screenEl = document.getElementById('screen');
+  var cssEl = document.getElementById('screen-css');
+  var stage = document.getElementById('stage'), phone = document.getElementById('phone');
+  var current = null, comp = null, tpl = null, compiled = {};
+
+  /* ---- tiny runtime for the prototype's screen templates ---- */
+  function DCLogic(props) { this.props = props || {}; this.state = {}; }
+  DCLogic.prototype.setState = function (o) {
+    this.state = Object.assign({}, this.state, typeof o === 'function' ? o(this.state) : o);
+    if (this.__render) this.__render();
+  };
+  function makeClass(src) {
+    // classes in the screen code use `extends DCLogic`, so give them an ES class to extend
+    var Base = class { constructor(p) { DCLogic.call(this, p); } setState(o) { DCLogic.prototype.setState.call(this, o); } };
+    return new Function('DCLogic', src + '\nreturn Component;')(Base);
+  }
+  function lookup(path, scope) {
+    path = path.trim();
+    if (path === 'true') return true;
+    if (path === 'false') return false;
+    var parts = path.split('.'), v = scope;
+    for (var i = 0; i < parts.length; i++) { if (v == null) return undefined; v = v[parts[i]]; }
+    return v;
+  }
+  var ONE = /^\{\{\s*([\w.]+)\s*\}\}$/;
+  function interp(str, scope) {
+    return str.replace(/\{\{\s*([\w.]+)\s*\}\}/g, function (_, p) { var v = lookup(p, scope); return v == null ? '' : String(v); });
+  }
+  var EVENTS = { onclick: 'click', oninput: 'input', onchange: 'change', onsubmit: 'submit', onkeydown: 'keydown' };
+  function bindEvent(el, type, fn) {
+    el.__h = el.__h || {};
+    el.__h[type] = fn;
+    el.__b = el.__b || {};
+    if (!el.__b[type]) { el.__b[type] = 1; el.addEventListener(type, function (e) { var h = el.__h && el.__h[type]; if (typeof h === 'function') h(e); }); }
+  }
+  function build(node, scope, out) {
+    if (node.nodeType === 3) { out.push(document.createTextNode(interp(node.data, scope))); return; }
+    if (node.nodeType !== 1) return;
+    var tag = node.localName;
+    if (tag === 'sc-for') {
+      var list = lookup((node.getAttribute('list') || '').replace(/[{}]/g, ''), scope) || [];
+      var as = node.getAttribute('as') || 'item';
+      for (var i = 0; i < list.length; i++) {
+        var s = Object.create(scope); s[as] = list[i];
+        node.childNodes.forEach(function (c) { build(c, s, out); });
+      }
+      return;
+    }
+    if (tag === 'sc-if') {
+      if (lookup((node.getAttribute('value') || '').replace(/[{}]/g, ''), scope)) node.childNodes.forEach(function (c) { build(c, scope, out); });
+      return;
+    }
+    var el = node.namespaceURI && node.namespaceURI !== 'http://www.w3.org/1999/xhtml'
+      ? document.createElementNS(node.namespaceURI, node.tagName) : document.createElement(tag);
+    for (var a = 0; a < node.attributes.length; a++) {
+      var at = node.attributes[a], name = at.name, val = at.value;
+      if (name.indexOf('hint-placeholder') === 0) continue;
+      var ev = EVENTS[name.toLowerCase()];
+      if (ev) { var m = val.match(ONE); if (m) { var fn = lookup(m[1], scope); if (fn) bindEvent(el, ev, fn); } continue; }
+      el.setAttribute(name, val.indexOf('{{') >= 0 ? interp(val, scope) : val);
+    }
+    var kids = [];
+    var src = tag === 'template' ? node.content : node;
+    src.childNodes.forEach(function (c) { build(c, scope, kids); });
+    kids.forEach(function (k) { el.appendChild(k); });
+    out.push(el);
+  }
+  function patchChildren(live, fresh) {
+    var a = Array.prototype.slice.call(live.childNodes), b = fresh;
+    for (var i = 0; i < b.length; i++) {
+      if (i >= a.length) { live.appendChild(b[i]); continue; }
+      patch(live, a[i], b[i]);
+    }
+    for (var j = b.length; j < a.length; j++) live.removeChild(a[j]);
+  }
+  function patch(parent, o, n) {
+    if (o.nodeType !== n.nodeType || (o.nodeType === 1 && (o.namespaceURI !== n.namespaceURI || o.tagName !== n.tagName))) { parent.replaceChild(n, o); return; }
+    if (o.nodeType === 3) { if (o.data !== n.data) o.data = n.data; return; }
+    if (o.nodeType !== 1) return;
+    var i, at;
+    for (i = o.attributes.length - 1; i >= 0; i--) { at = o.attributes[i]; if (!n.hasAttribute(at.name)) o.removeAttribute(at.name); }
+    for (i = 0; i < n.attributes.length; i++) { at = n.attributes[i]; if (o.getAttribute(at.name) !== at.value) o.setAttribute(at.name, at.value); }
+    // move handlers over
+    o.__h = {};
+    if (n.__h) for (var t in n.__h) bindEvent(o, t, n.__h[t]);
+    patchChildren(o, Array.prototype.slice.call(n.childNodes));
+  }
+  function render(first) {
+    var vals;
+    try { vals = comp.renderVals ? comp.renderVals() : {}; } catch (e) { console.error(e); vals = {}; }
+    var out = [];
+    tpl.content.childNodes.forEach(function (c) { build(c, vals, out); });
+    if (first) { screenEl.innerHTML = ''; out.forEach(function (n) { screenEl.appendChild(n); }); }
+    else patchChildren(screenEl, out);
+  }
+  function mount(key) {
+    if (!SCREENS[key]) key = ORDER[0];
+    if (comp && comp.componentWillUnmount) { try { comp.componentWillUnmount(); } catch (e) {} }
+    current = key;
+    var sc = SCREENS[key];
+    if (!compiled[key]) {
+      var t = document.createElement('template'); t.innerHTML = sc.html;
+      compiled[key] = { tpl: t, Cls: makeClass(sc.js) };
+    }
+    tpl = compiled[key].tpl;
+    cssEl.textContent = sc.css;
+    comp = new compiled[key].Cls({});
+    comp.__render = function () { render(false); };
+    render(true);
+    if (comp.componentDidMount) { try { comp.componentDidMount(); } catch (e) { console.error(e); } }
+    markList();
+  }
+  function go(key) {
+    if (key === current) return;
+    try { if (location.hash !== '#' + key) location.hash = key; else mount(key); } catch (e) { mount(key); }
+  }
+  window.addEventListener('hashchange', function () { var k = (location.hash || '').slice(1); if (k && k !== current) mount(k); });
+  screenEl.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    var m = a.getAttribute('href').match(/^([\w-]+)\.dc\.html$/);
+    if (m) { e.preventDefault(); go(m[1]); }
+  });
+
+  /* ---- presenter rail ---- */
+  var list = document.getElementById('list');
+  ORDER.forEach(function (k) {
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = SCREENS[k].title; b.dataset.k = k;
+    b.addEventListener('click', function () { go(k); });
+    list.appendChild(b);
+  });
+  function markList() { list.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-current', b.dataset.k === current ? 'true' : 'false'); }); }
+  document.getElementById('restart').addEventListener('click', function () {
+    try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('tabkha.') === 0) localStorage.removeItem(k); }); } catch (e) {}
+    compiled = {}; current = null; go(ORDER[0]); if (current !== ORDER[0]) mount(ORDER[0]);
+  });
+
+  /* ---- fit the 390 x 844 screen to any device ---- */
+  function fit() {
+    var w = window.innerWidth, h = window.innerHeight, wide = w >= 900, mobile = w < 600;
+    var s = mobile ? Math.min(w / 390, h / 844) : Math.min(1, (h - 48) / 844, (w - 32) / 390);
+    stage.classList.toggle('framed', !mobile);
+    stage.style.width = (390 * s) + 'px'; stage.style.height = (844 * s) + 'px';
+    phone.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit); fit();
+
+  document.getElementById('boot').remove();
+  var start = (location.hash || '').slice(1);
+  mount(SCREENS[start] ? start : ORDER[0]);
+})();
+</script>
